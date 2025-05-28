@@ -1,6 +1,6 @@
 FROM openjdk:17-jdk-slim
 
 ADD ./PerformanceTest.java /PerformanceTest.java
-RUN javac PerformanceTest.java
+RUN javac  PerformanceTest.java
 
-CMD ["java", "PerformanceTest"]
+CMD ["java","-XX:+PreserveFramePointer", "PerformanceTest"]
