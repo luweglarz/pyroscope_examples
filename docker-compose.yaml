@@ -1,34 +1,73 @@
----
-  version: '3.9'
-  services:
-    pyroscope:
-      image: grafana/pyroscope
-      ports:
-        - '4040:4040'
-      
-    cpp-resource-consuming:
-      build: ./cpp_app
-      ports:
-        - '8080:8080'
-    
-    java-resource-consuming:
-      build: ./java_app
-  
-    grafana-agent:
-      image: 'grafana/alloy:v1.5.0'
-      privileged: true
-      user: root
-      pid: 'host'
-      volumes:
-        - '/var/run/docker.sock:/var/run/docker.sock'
-        - ./config.alloy:/config.alloy
-      ports:
-        - '12345:12345'
-      command:
-        - run
-        - ./config.alloy
-        - --storage.path=/tmp/alloy
-        - --server.http.listen-addr=0.0.0.0:12345
-        - --server.http.ui-path-prefix=/
-        - --stability.level=public-preview
+version: '3.9'
 
+services:
+  pyroscope:
+    image: grafana/pyroscope:latest
+    ports:
+      - '4040:4040'
+    environment:
+      - PYROSCOPE_LOG_LEVEL=debug
+
+  cpp-resource-consuming:
+    build: ./cpp_app
+    ports:
+      - '8080:8080'
+    depends_on:
+      - pyroscope
+
+  java-resource-consuming:
+    build: ./java_app
+    depends_on:
+      - pyroscope
+
+  otel-ebpf-profiler:
+    image: ebpf-otel-profiler:latest
+    privileged: true
+    pid: host
+    network_mode: host
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - SYS_RESOURCE
+      - NET_ADMIN
+      - BPF
+    security_opt:
+      - label:type:spc_t
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4040
+      - OTEL_SERVICE_NAME=otel-ebpf-profiler
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=otel-ebpf-profiler
+    volumes:
+      - /sys/fs/bpf:/sys/fs/bpf:rw
+      - /sys/kernel/debug:/sys/kernel/debug:rw
+      - /proc:/proc:ro
+      - /sys:/sys:ro
+      - /sys/kernel/security:/sys/kernel/security:ro
+    depends_on:
+      - pyroscope
+    command: [
+      "-collection-agent=http://localhost:4040",
+      "-disable-tls=true",
+      "-reporter-interval=5s",
+      "-log-level=debug"
+    ]
+
+  grafana-agent:
+    image: 'grafana/alloy:v1.5.0'
+    privileged: true
+    user: root
+    pid: host
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - './config.alloy:/etc/alloy/config.alloy'
+    ports:
+      - '12345:12345'
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - '--storage.path=/tmp/alloy'
+      - '--server.http.listen-addr=0.0.0.0:12345'
+      - '--server.http.ui-path-prefix=/'
+      - '--stability.level=public-preview'
+    depends_on:
+      - pyroscope
