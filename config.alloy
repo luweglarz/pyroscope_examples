@@ -18,6 +18,7 @@ pyroscope.ebpf "instance" {
   collect_user_profile = true
   collect_kernel_profile = false
   sample_rate = 50
+  off_cpu_threshold = 1000
 }
 
 discovery.process "all" {

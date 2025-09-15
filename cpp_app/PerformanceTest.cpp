@@ -7,8 +7,40 @@
 #include <chrono>
 #include <thread>
 #include <cctype>
+#include <mutex>
+#include <condition_variable>
+#include <unistd.h>
 
 using namespace std;
+
+// Globals for off-CPU primitives
+mutex g_mtx;
+condition_variable g_cv;
+int g_pipefd[2]; // g_pipefd[0] = read end, g_pipefd[1] = write end
+
+// Off-CPU: repeated nanosleep
+void offCpuSleepLoop() {
+    while (true) {
+        this_thread::sleep_for(chrono::milliseconds(1000)); // long sleep -> off-CPU
+    }
+}
+
+// Off-CPU: futex wait via condition_variable timeout
+void offCpuCondVarWaiter() {
+    unique_lock<mutex> lk(g_mtx);
+    while (true) {
+        g_cv.wait_for(lk, chrono::milliseconds(2000)); // timed wait -> off-CPU
+    }
+}
+
+// Off-CPU: blocking read on a pipe with writer kept open so it never EOFs
+void offCpuPipeReader() {
+    char buf[4096];
+    while (true) {
+        ssize_t n = read(g_pipefd[0], buf, sizeof(buf)); // blocks forever (I/O wait)
+        (void)n; // unreachable under normal conditions; keeps compiler quiet
+    }
+}
 
 // ------------------------ Math & Number Functions ------------------------
 
@@ -301,6 +333,19 @@ void deepChain10(int level) {
 
 int main() {
     cout << "Starting eBPF Profiling Symbolization Test Application" << endl;
+
+    // Initialize blocking pipe before starting threads
+    if (pipe(g_pipefd) != 0) {
+        perror("pipe");
+        return 1;
+    }
+
+    // Spin up several off-CPU threads
+    thread(offCpuSleepLoop).detach();
+    thread(offCpuSleepLoop).detach();
+    thread(offCpuCondVarWaiter).detach();
+    thread(offCpuCondVarWaiter).detach();
+    thread(offCpuPipeReader).detach();
 
     // Initial individual function computation tests (optional).
     cout << "Initial tests:" << endl;
